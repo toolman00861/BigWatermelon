@@ -1,7 +1,7 @@
 import { getSql } from "@/lib/db";
 import { dynamicRoute, handleRouteError, jsonError } from "@/lib/http";
 import { readSessionUser } from "@/lib/session";
-import { audioKey, uploadsBucket } from "@/lib/storage";
+import { audioKey, publishUpload, uploadsBucket } from "@/lib/storage";
 import { AUDIO_TYPES, readUpload } from "@/lib/uploads";
 
 export async function GET() {
@@ -36,16 +36,23 @@ export async function POST(request: Request) {
     const upload = await readUpload(request, AUDIO_TYPES, 2 * 1024 * 1024);
     if (!upload.ok) return jsonError(upload.error, 400);
     const key = audioKey(user.id);
-    await uploadsBucket().upload(key, upload.bytes, { contentType: upload.contentType });
     const sql = await getSql();
-    await sql`
-      insert into player_audio (user_id, content_type, object_key, updated_at)
-      values (${user.id}, ${upload.contentType}, ${key}, now())
-      on conflict (user_id) do update
-      set content_type = excluded.content_type,
-          object_key = excluded.object_key,
-          updated_at = now()
-    `;
+    await publishUpload(key, upload.bytes, upload.contentType, async () => {
+      const rows = await sql`
+        with previous as (
+          select object_key from player_audio where user_id = ${user.id}
+        )
+        insert into player_audio (user_id, content_type, object_key, updated_at)
+        values (${user.id}, ${upload.contentType}, ${key}, now())
+        on conflict (user_id) do update
+        set content_type = excluded.content_type,
+            object_key = excluded.object_key,
+            updated_at = now()
+        returning (select object_key from previous) as previous_key
+      `;
+      const previous = rows[0] as { previous_key: string | null } | undefined;
+      return previous?.previous_key ?? null;
+    });
     return Response.json({ ok: true });
   } catch (error) {
     return handleRouteError(error);

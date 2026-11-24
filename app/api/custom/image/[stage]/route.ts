@@ -2,7 +2,7 @@ import { FRUITS } from "@/lib/fruits";
 import { getSql } from "@/lib/db";
 import { dynamicRoute, handleRouteError, jsonError } from "@/lib/http";
 import { readSessionUser } from "@/lib/session";
-import { imageKey, uploadsBucket } from "@/lib/storage";
+import { imageKey, publishUpload, uploadsBucket } from "@/lib/storage";
 import { IMAGE_TYPES, readUpload } from "@/lib/uploads";
 
 function stageFrom(value: string) {
@@ -53,15 +53,23 @@ export async function POST(
     const upload = await readUpload(request, IMAGE_TYPES, 1024 * 1024);
     if (!upload.ok) return jsonError(upload.error, 400);
     const key = imageKey(user.id, stage);
-    await uploadsBucket().upload(key, upload.bytes, { contentType: upload.contentType });
     const sql = await getSql();
-    await sql`
-      insert into player_images (user_id, stage, content_type, object_key)
-      values (${user.id}, ${stage}, ${upload.contentType}, ${key})
-      on conflict (user_id, stage) do update
-      set content_type = excluded.content_type,
-          object_key = excluded.object_key
-    `;
+    await publishUpload(key, upload.bytes, upload.contentType, async () => {
+      const rows = await sql`
+        with previous as (
+          select object_key from player_images
+          where user_id = ${user.id} and stage = ${stage}
+        )
+        insert into player_images (user_id, stage, content_type, object_key)
+        values (${user.id}, ${stage}, ${upload.contentType}, ${key})
+        on conflict (user_id, stage) do update
+        set content_type = excluded.content_type,
+            object_key = excluded.object_key
+        returning (select object_key from previous) as previous_key
+      `;
+      const previous = rows[0] as { previous_key: string | null } | undefined;
+      return previous?.previous_key ?? null;
+    });
     return Response.json({ stage });
   } catch (error) {
     return handleRouteError(error);

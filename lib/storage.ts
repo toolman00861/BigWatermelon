@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Files } from "files-sdk";
 import { neon } from "files-sdk/neon";
 
@@ -25,9 +26,29 @@ export function uploadsBucket() {
 }
 
 export function imageKey(userId: string, stage: number) {
-  return `players/${userId}/images/${stage}`;
+  return `players/${userId}/images/${stage}/${randomUUID()}`;
 }
 
 export function audioKey(userId: string) {
-  return `players/${userId}/audio`;
+  return `players/${userId}/audio/${randomUUID()}`;
+}
+
+export async function publishUpload(
+  key: string,
+  bytes: Buffer,
+  contentType: string,
+  commit: () => Promise<string | null>,
+) {
+  const bucket = uploadsBucket();
+  await bucket.upload(key, bytes, { contentType });
+  let previous: string | null;
+  try {
+    previous = await commit();
+  } catch (error) {
+    await bucket.delete(key).catch(() => undefined);
+    throw error;
+  }
+  if (previous && previous !== key) {
+    await bucket.delete(previous).catch(() => undefined);
+  }
 }
