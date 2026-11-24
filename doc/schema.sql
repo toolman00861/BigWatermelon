@@ -24,13 +24,13 @@ create table if not exists player_images (
   user_id uuid not null references users(id) on delete cascade,
   stage integer not null check (stage >= 0 and stage <= 10),
   content_type text not null,
-  data_base64 text not null,
+  object_key text not null,
   primary key (user_id, stage)
 );
 
 create table if not exists player_audio (
   user_id uuid primary key references users(id) on delete cascade,
   content_type text not null,
-  data_base64 text not null,
+  object_key text not null,
   updated_at timestamptz not null default now()
 );

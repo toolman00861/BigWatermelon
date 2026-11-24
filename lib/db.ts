@@ -34,15 +34,23 @@ const STATEMENTS = [
     user_id uuid not null references users(id) on delete cascade,
     stage integer not null check (stage >= 0 and stage <= 10),
     content_type text not null,
-    data_base64 text not null,
+    object_key text not null,
     primary key (user_id, stage)
   )`,
   `create table if not exists player_audio (
     user_id uuid primary key references users(id) on delete cascade,
     content_type text not null,
-    data_base64 text not null,
+    object_key text not null,
     updated_at timestamptz not null default now()
   )`,
+  `alter table player_images add column if not exists object_key text`,
+  `alter table player_audio add column if not exists object_key text`,
+  `delete from player_images where object_key is null`,
+  `delete from player_audio where object_key is null`,
+  `alter table player_images alter column object_key set not null`,
+  `alter table player_audio alter column object_key set not null`,
+  `alter table player_images drop column if exists data_base64`,
+  `alter table player_audio drop column if exists data_base64`,
 ];
 
 export function databaseConfigured() {

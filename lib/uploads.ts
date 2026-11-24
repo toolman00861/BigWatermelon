@@ -24,6 +24,6 @@ export async function readUpload(
   return {
     ok: true as const,
     contentType: file.type,
-    dataBase64: bytes.toString("base64"),
+    bytes,
   };
 }
