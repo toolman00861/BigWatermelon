@@ -3,12 +3,13 @@
 import { useState } from "react";
 import { FRUITS } from "@/lib/fruits";
 
-export type AccountUser = { id: string; username: string };
+export type AccountUser = { id: string; username: string; isAdmin?: boolean };
 
 type Props = {
   open: boolean;
   database: boolean | null;
   user: AccountUser | null;
+  assetsLoading: boolean;
   imageUrls: (string | null)[];
   hasAudio: boolean;
   onClose: () => void;
@@ -21,6 +22,7 @@ export function SettingsSheet({
   open,
   database,
   user,
+  assetsLoading,
   imageUrls,
   hasAudio,
   onClose,
@@ -191,7 +193,11 @@ export function SettingsSheet({
                   <span className="flex-1">
                     <span className="block font-medium">{fruit.name}</span>
                     <span className="text-xs text-[#a56b45]">
-                      {imageUrls[stage] ? "已换成自己的图" : "内置画法"}
+                      {assetsLoading
+                        ? "资源加载中"
+                        : imageUrls[stage]
+                          ? "已换成自己的图"
+                          : "内置画法"}
                     </span>
                   </span>
                   <label className="cursor-pointer rounded-full bg-[#f3e2cc] px-3 py-2 text-sm">
@@ -200,7 +206,7 @@ export function SettingsSheet({
                       className="hidden"
                       type="file"
                       accept="image/png,image/jpeg,image/webp"
-                      disabled={!user}
+                      disabled={!user || assetsLoading}
                       onChange={async (event) => {
                         const file = event.target.files?.[0];
                         event.target.value = "";
@@ -241,7 +247,7 @@ export function SettingsSheet({
                   className="hidden"
                   type="file"
                   accept="audio/mpeg,audio/wav,audio/ogg,audio/webm,.mp3,.wav,.ogg"
-                  disabled={!user}
+                  disabled={!user || assetsLoading}
                   onChange={async (event) => {
                     const file = event.target.files?.[0];
                     event.target.value = "";
@@ -252,7 +258,9 @@ export function SettingsSheet({
                   }}
                 />
               </label>
-              {hasAudio ? (
+              {assetsLoading ? (
+                <span className="text-sm text-[#a56b45]">资源加载中</span>
+              ) : hasAudio ? (
                 <button
                   type="button"
                   className="rounded-full bg-[#f3e2cc] px-4 py-2 text-sm"

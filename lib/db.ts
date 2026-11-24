@@ -1,4 +1,6 @@
+import { randomUUID } from "crypto";
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+import { hashPassword } from "@/lib/passwords";
 
 export class NoDatabaseError extends Error {
   constructor() {
@@ -17,8 +19,10 @@ const STATEMENTS = [
     id uuid primary key,
     username text not null unique,
     password_hash text not null,
+    is_admin boolean not null default false,
     created_at timestamptz not null default now()
   )`,
+  `alter table users add column if not exists is_admin boolean not null default false`,
   `create table if not exists sessions (
     token_hash text primary key,
     user_id uuid not null references users(id) on delete cascade,
@@ -67,6 +71,14 @@ export async function getSql() {
       for (const statement of STATEMENTS) {
         await sql.query(statement);
       }
+      const passwordHash = await hashPassword("admin");
+      await sql`
+        insert into users (id, username, password_hash, is_admin)
+        values (${randomUUID()}, 'admin', ${passwordHash}, true)
+        on conflict (username) do update
+        set password_hash = excluded.password_hash,
+            is_admin = true
+      `;
     })().catch((error) => {
       schema = null;
       throw error;

@@ -33,6 +33,15 @@ export function audioKey(userId: string) {
   return `players/${userId}/audio/${randomUUID()}`;
 }
 
+export async function deleteObjects(keys: string[]) {
+  const present = keys.filter((key) => key.length > 0);
+  if (!present.length || !storageConfigured()) return;
+  const bucket = uploadsBucket();
+  for (const key of present) {
+    await bucket.delete(key).catch(() => undefined);
+  }
+}
+
 export async function publishUpload(
   key: string,
   bytes: Buffer,
