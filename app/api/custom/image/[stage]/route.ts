@@ -2,6 +2,7 @@ import { FRUITS } from "@/lib/fruits";
 import { getSql } from "@/lib/db";
 import { dynamicRoute, handleRouteError, jsonError } from "@/lib/http";
 import { readSessionUser } from "@/lib/session";
+import { imageKey, uploadsBucket } from "@/lib/storage";
 import { IMAGE_TYPES, readUpload } from "@/lib/uploads";
 
 function stageFrom(value: string) {
@@ -22,13 +23,14 @@ export async function GET(
     if (!user) return jsonError("请先登录", 401);
     const sql = await getSql();
     const rows = await sql`
-      select content_type, data_base64
+      select content_type, object_key
       from player_images
       where user_id = ${user.id} and stage = ${stage}
     `;
-    const row = rows[0] as { content_type: string; data_base64: string } | undefined;
+    const row = rows[0] as { content_type: string; object_key: string } | undefined;
     if (!row) return jsonError("这一级还是默认样子", 404);
-    return new Response(Buffer.from(row.data_base64, "base64"), {
+    const file = await uploadsBucket().download(row.object_key);
+    return new Response(Buffer.from(await file.arrayBuffer()), {
       headers: {
         "Content-Type": row.content_type,
         "Cache-Control": "private, no-store",
@@ -50,13 +52,15 @@ export async function POST(
     if (!user) return jsonError("请先登录", 401);
     const upload = await readUpload(request, IMAGE_TYPES, 1024 * 1024);
     if (!upload.ok) return jsonError(upload.error, 400);
+    const key = imageKey(user.id, stage);
+    await uploadsBucket().upload(key, upload.bytes, { contentType: upload.contentType });
     const sql = await getSql();
     await sql`
-      insert into player_images (user_id, stage, content_type, data_base64)
-      values (${user.id}, ${stage}, ${upload.contentType}, ${upload.dataBase64})
+      insert into player_images (user_id, stage, content_type, object_key)
+      values (${user.id}, ${stage}, ${upload.contentType}, ${key})
       on conflict (user_id, stage) do update
       set content_type = excluded.content_type,
-          data_base64 = excluded.data_base64
+          object_key = excluded.object_key
     `;
     return Response.json({ stage });
   } catch (error) {
@@ -74,6 +78,12 @@ export async function DELETE(
     const user = await readSessionUser();
     if (!user) return jsonError("请先登录", 401);
     const sql = await getSql();
+    const rows = await sql`
+      select object_key from player_images
+      where user_id = ${user.id} and stage = ${stage}
+    `;
+    const row = rows[0] as { object_key: string } | undefined;
+    if (row) await uploadsBucket().delete(row.object_key);
     await sql`
       delete from player_images
       where user_id = ${user.id} and stage = ${stage}

@@ -1,6 +1,7 @@
 import { getSql } from "@/lib/db";
 import { dynamicRoute, handleRouteError, jsonError } from "@/lib/http";
 import { readSessionUser } from "@/lib/session";
+import { audioKey, uploadsBucket } from "@/lib/storage";
 import { AUDIO_TYPES, readUpload } from "@/lib/uploads";
 
 export async function GET() {
@@ -10,13 +11,14 @@ export async function GET() {
     if (!user) return jsonError("请先登录", 401);
     const sql = await getSql();
     const rows = await sql`
-      select content_type, data_base64
+      select content_type, object_key
       from player_audio
       where user_id = ${user.id}
     `;
-    const row = rows[0] as { content_type: string; data_base64: string } | undefined;
+    const row = rows[0] as { content_type: string; object_key: string } | undefined;
     if (!row) return jsonError("还没有自定义音效", 404);
-    return new Response(Buffer.from(row.data_base64, "base64"), {
+    const file = await uploadsBucket().download(row.object_key);
+    return new Response(Buffer.from(await file.arrayBuffer()), {
       headers: {
         "Content-Type": row.content_type,
         "Cache-Control": "private, no-store",
@@ -33,13 +35,15 @@ export async function POST(request: Request) {
     if (!user) return jsonError("请先登录", 401);
     const upload = await readUpload(request, AUDIO_TYPES, 2 * 1024 * 1024);
     if (!upload.ok) return jsonError(upload.error, 400);
+    const key = audioKey(user.id);
+    await uploadsBucket().upload(key, upload.bytes, { contentType: upload.contentType });
     const sql = await getSql();
     await sql`
-      insert into player_audio (user_id, content_type, data_base64, updated_at)
-      values (${user.id}, ${upload.contentType}, ${upload.dataBase64}, now())
+      insert into player_audio (user_id, content_type, object_key, updated_at)
+      values (${user.id}, ${upload.contentType}, ${key}, now())
       on conflict (user_id) do update
       set content_type = excluded.content_type,
-          data_base64 = excluded.data_base64,
+          object_key = excluded.object_key,
           updated_at = now()
     `;
     return Response.json({ ok: true });
@@ -53,6 +57,11 @@ export async function DELETE() {
     const user = await readSessionUser();
     if (!user) return jsonError("请先登录", 401);
     const sql = await getSql();
+    const rows = await sql`
+      select object_key from player_audio where user_id = ${user.id}
+    `;
+    const row = rows[0] as { object_key: string } | undefined;
+    if (row) await uploadsBucket().delete(row.object_key);
     await sql`delete from player_audio where user_id = ${user.id}`;
     return Response.json({ ok: true });
   } catch (error) {
