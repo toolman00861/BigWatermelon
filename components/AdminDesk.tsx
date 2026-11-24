@@ -23,6 +23,11 @@ type PlayerDetail = PlayerSummary & {
   images: number[];
 };
 
+type PlayerPage = {
+  players: PlayerSummary[];
+  next: { before: string; beforeId: string } | null;
+};
+
 type Draft = {
   username: string;
   password: string;
@@ -40,15 +45,25 @@ export function AdminDesk() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [players, setPlayers] = useState<PlayerSummary[]>([]);
+  const [query, setQuery] = useState("");
+  const [nextPage, setNextPage] = useState<PlayerPage["next"]>(null);
   const [selected, setSelected] = useState<PlayerDetail | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pending, setPending] = useState(false);
 
-  async function loadPlayers() {
-    const response = await fetch("/api/admin/players");
+  async function loadPlayers(options?: { append?: boolean; query?: string }) {
+    const q = options?.query ?? query;
+    const params = new URLSearchParams();
+    if (q.trim()) params.set("q", q.trim());
+    if (options?.append && nextPage) {
+      params.set("before", nextPage.before);
+      params.set("beforeId", nextPage.beforeId);
+    }
+    const response = await fetch(`/api/admin/players?${params.toString()}`);
     if (response.status === 401 || response.status === 403) {
       setAuthed(false);
       setPlayers([]);
+      setNextPage(null);
       return false;
     }
     if (!response.ok) {
@@ -56,8 +71,9 @@ export function AdminDesk() {
       setMessage(body.error ?? "玩家列表没有读出来");
       return false;
     }
-    const body = (await response.json()) as { players: PlayerSummary[] };
-    setPlayers(body.players);
+    const body = (await response.json()) as PlayerPage;
+    setPlayers((current) => (options?.append ? [...current, ...body.players] : body.players));
+    setNextPage(body.next);
     setAuthed(true);
     return true;
   }
@@ -67,6 +83,8 @@ export function AdminDesk() {
       await loadPlayers();
       setReady(true);
     })();
+    // The desk loads the first page once. Search and "load more" call loadPlayers themselves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function login() {
@@ -251,7 +269,26 @@ export function AdminDesk() {
       {authed ? (
         <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
           <section className="overflow-hidden rounded-3xl bg-[#fff8ee] shadow-[0_16px_40px_rgba(90,45,15,0.12)]">
-            <div className="border-b border-[#ead8bf] px-4 py-3 text-sm text-[#8a6248]">共 {players.length} 个账号</div>
+            <form
+              className="flex gap-2 border-b border-[#ead8bf] px-4 py-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void loadPlayers({ query });
+              }}
+            >
+              <input
+                className="min-w-0 flex-1 rounded-full border border-[#ead8bf] bg-white px-4 py-2 text-sm outline-none"
+                placeholder="按用户名查找"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              <button type="submit" className="rounded-full bg-[#f3e2cc] px-4 py-2 text-sm">
+                查找
+              </button>
+            </form>
+            <div className="border-b border-[#ead8bf] px-4 py-3 text-sm text-[#8a6248]">
+              已显示 {players.length} 个账号{nextPage ? "，后面还有" : ""}
+            </div>
             <ul className="divide-y divide-[#ead8bf]">
               {players.map((player) => (
                 <li key={player.id}>
@@ -274,6 +311,17 @@ export function AdminDesk() {
                 </li>
               ))}
             </ul>
+            {nextPage ? (
+              <div className="border-t border-[#ead8bf] px-4 py-3">
+                <button
+                  type="button"
+                  className="w-full rounded-full bg-[#f3e2cc] py-2 text-sm"
+                  onClick={() => void loadPlayers({ append: true })}
+                >
+                  加载更多
+                </button>
+              </div>
+            ) : null}
           </section>
 
           <section className="rounded-3xl bg-[#fff8ee] p-4 shadow-[0_16px_40px_rgba(90,45,15,0.12)]">
