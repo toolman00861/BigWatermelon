@@ -12,15 +12,12 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+body {
+  background: #f6d7ae;
+  color: #3b2415;
+  font-family: var(--font-geist-sans), "PingFang SC", "Noto Sans SC", sans-serif;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.font-display {
+  font-family: "Iowan Old Style", "Songti SC", "Noto Serif SC", "Source Han Serif SC", serif;
 }
