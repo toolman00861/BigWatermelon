@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Files } from "files-sdk";
+import { Files, FilesError } from "files-sdk";
 import { neon } from "files-sdk/neon";
 
 export const UPLOADS_BUCKET = "uploads";
@@ -31,6 +31,20 @@ export function imageKey(userId: string, stage: number) {
 
 export function audioKey(userId: string) {
   return `players/${userId}/audio/${randomUUID()}`;
+}
+
+export async function deleteObjects(keys: string[]) {
+  const present = keys.filter((key) => key.length > 0);
+  if (!present.length) return;
+  const bucket = uploadsBucket();
+  for (const key of present) {
+    try {
+      await bucket.delete(key);
+    } catch (error) {
+      if (error instanceof FilesError && error.code === "NotFound") continue;
+      throw error;
+    }
+  }
 }
 
 export async function publishUpload(

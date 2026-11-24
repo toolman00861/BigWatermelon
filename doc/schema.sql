@@ -4,8 +4,11 @@ create table if not exists users (
   id uuid primary key,
   username text not null unique,
   password_hash text not null,
+  is_admin boolean not null default false,
   created_at timestamptz not null default now()
 );
+
+alter table users add column if not exists is_admin boolean not null default false;
 
 create table if not exists sessions (
   token_hash text primary key,

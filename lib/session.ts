@@ -8,6 +8,7 @@ const MAX_AGE = 60 * 60 * 24 * 30;
 export type SessionUser = {
   id: string;
   username: string;
+  isAdmin: boolean;
 };
 
 export function newToken() {
@@ -39,14 +40,14 @@ export async function readSessionUser(): Promise<SessionUser | null> {
   if (!token) return null;
   const sql = await getSql();
   const rows = await sql`
-    select u.id, u.username
+    select u.id, u.username, u.is_admin
     from sessions s
     join users u on u.id = s.user_id
     where s.token_hash = ${hashToken(token)}
       and s.expires_at > now()
   `;
-  const row = rows[0] as { id: string; username: string } | undefined;
-  return row ? { id: row.id, username: row.username } : null;
+  const row = rows[0] as { id: string; username: string; is_admin: boolean } | undefined;
+  return row ? { id: row.id, username: row.username, isAdmin: row.is_admin } : null;
 }
 
 export function validUsername(username: string) {

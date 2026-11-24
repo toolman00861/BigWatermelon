@@ -9,6 +9,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as { username?: string; password?: string };
     const username = body.username?.trim() ?? "";
     const password = body.password ?? "";
+    if (username === "admin") return jsonError("这个用户名留给管理员了", 400);
     if (!validUsername(username)) {
       return jsonError("用户名用 2 到 20 位的汉字、字母或数字", 400);
     }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Body, Engine } from "matter-js";
 import { MergeAudio } from "@/lib/audio";
 import { drawFruit, FRUITS, randomDropKind, WORLD } from "@/lib/fruits";
@@ -30,8 +31,11 @@ export function Game() {
   const userRef = useRef<AccountUser | null>(null);
   const onChangeRef = useRef<(save: SaveState) => void>(() => undefined);
   const pendingSave = useRef<SaveState | null>(null);
+  const playLocked = useRef(false);
+  const loadGeneration = useRef(0);
 
   const [hud, setHud] = useState({ score: 0, best: 0, next: 0, over: false, fruits: 0 });
+  const [assetsLoading, setAssetsLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [user, setUser] = useState<AccountUser | null>(null);
   const [database, setDatabase] = useState<boolean | null>(null);
@@ -73,36 +77,54 @@ export function Game() {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const me = (await fetch("/api/auth/me").then((response) => response.json())) as {
-        user: AccountUser | null;
-        database: boolean;
-      };
-      if (cancelled) return;
-      setDatabase(me.database);
-      setUser(me.user);
-      if (!me.user) return;
+  const loadAccount = useCallback(async (next: AccountUser | null) => {
+    const generation = ++loadGeneration.current;
+    setUser(next);
+    if (!next) {
+      playLocked.current = false;
+      setAssetsLoading(false);
+      setImageUrls(FRUITS.map(() => null));
+      setHasAudio(false);
+      imagesRef.current = FRUITS.map(() => null);
+      audioRef.current.clearCustom();
+      return;
+    }
+    playLocked.current = true;
+    setAssetsLoading(true);
+    try {
       const [saveResponse, customResponse] = await Promise.all([
         fetch("/api/save"),
         fetch("/api/custom"),
       ]);
-      if (cancelled) return;
+      if (generation !== loadGeneration.current) return;
       if (saveResponse.ok) {
         const body = (await saveResponse.json()) as { state: SaveState | null };
         if (body.state) pendingSave.current = body.state;
       }
+      let urls = FRUITS.map(() => null as string | null);
+      let audio = false;
       if (customResponse.ok) {
         const custom = (await customResponse.json()) as { images: number[]; audio: boolean };
-        setImageUrls(FRUITS.map((_, stage) => (
-          custom.images.includes(stage) ? `/api/custom/image/${stage}` : null
-        )));
-        setHasAudio(custom.audio);
-        if (custom.audio) {
-          const audio = await fetch("/api/custom/audio");
-          if (audio.ok) await audioRef.current.useCustom(await audio.arrayBuffer());
-        }
+        urls = FRUITS.map((_, stage) => (
+          custom.images.includes(stage)
+            ? `/api/custom/image/${stage}?u=${encodeURIComponent(next.id)}`
+            : null
+        ));
+        audio = custom.audio;
+      }
+      const loaded = await Promise.all(urls.map((url) => (url ? loadImage(url) : Promise.resolve(null))));
+      if (generation !== loadGeneration.current) return;
+      imagesRef.current = loaded;
+      setImageUrls(urls);
+      if (audio) {
+        const audioResponse = await fetch(`/api/custom/audio?u=${encodeURIComponent(next.id)}`);
+        if (generation !== loadGeneration.current) return;
+        if (audioResponse.ok) await audioRef.current.useCustom(await audioResponse.arrayBuffer());
+        else audioRef.current.clearCustom();
+        setHasAudio(audioResponse.ok);
+      } else {
+        audioRef.current.clearCustom();
+        setHasAudio(false);
       }
       const waiting = pendingSave.current;
       if (waiting && apiRef.current) {
@@ -112,23 +134,29 @@ export function Game() {
         }
         pendingSave.current = null;
       }
+    } finally {
+      if (generation === loadGeneration.current) {
+        playLocked.current = false;
+        setAssetsLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const me = (await fetch("/api/auth/me").then((response) => response.json())) as {
+        user: AccountUser | null;
+        database: boolean;
+      };
+      if (cancelled) return;
+      setDatabase(me.database);
+      await loadAccount(me.user);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  useEffect(() => {
-    imageUrls.forEach((url, stage) => {
-      if (!url) {
-        imagesRef.current[stage] = null;
-        return;
-      }
-      const image = new Image();
-      image.src = url;
-      imagesRef.current[stage] = image;
-    });
-  }, [imageUrls]);
+  }, [loadAccount]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -264,7 +292,7 @@ export function Game() {
       }
 
       const drop = () => {
-        if (over) return;
+        if (playLocked.current || over) return;
         const now = performance.now();
         if (now - lastDrop < 450) return;
         lastDrop = now;
@@ -477,6 +505,11 @@ export function Game() {
           <div>
             <p className="text-xs tracking-[0.28em] text-[#8a542c]">木盒里的水果</p>
             <h1 className="font-display text-4xl leading-none">合成大西瓜</h1>
+            {user?.isAdmin ? (
+              <Link className="mt-1 inline-block text-sm text-[#a56b45] underline" href="/admin">
+                管理玩家
+              </Link>
+            ) : null}
           </div>
           <button
             type="button"
@@ -530,7 +563,15 @@ export function Game() {
               </div>
             </div>
           ) : null}
-          {hud.fruits === 0 && !hud.over ? (
+          {assetsLoading ? (
+            <div className="absolute inset-0 z-10 grid place-items-center rounded-[32px] bg-[#fff8ee]/88 p-6 text-center">
+              <div>
+                <p className="text-sm tracking-[0.22em] text-[#a56b45]">请稍候</p>
+                <p className="font-display mt-1 text-4xl">资源加载中</p>
+              </div>
+            </div>
+          ) : null}
+          {hud.fruits === 0 && !hud.over && !assetsLoading ? (
             <p className="pointer-events-none absolute bottom-8 left-0 w-full text-center text-sm text-[#8a542c]">
               点按木盒，把水果放进去
             </p>
@@ -541,19 +582,18 @@ export function Game() {
         open={open}
         database={database}
         user={user}
+        assetsLoading={assetsLoading}
         imageUrls={imageUrls}
         hasAudio={hasAudio}
         onClose={() => setOpen(false)}
         onUser={(nextUser) => {
-          setUser(nextUser);
-          if (!nextUser) {
-            setImageUrls(FRUITS.map(() => null));
-            setHasAudio(false);
-            audioRef.current.clearCustom();
-          }
+          void loadAccount(nextUser);
         }}
         onImage={(stage, url) => {
-          setImageUrls((current) => current.map((item, index) => (index === stage ? url : item)));
+          void (async () => {
+            imagesRef.current[stage] = url ? await loadImage(url) : null;
+            setImageUrls((current) => current.map((item, index) => (index === stage ? url : item)));
+          })();
         }}
         onAudio={(buffer) => {
           if (!buffer) {
@@ -567,6 +607,15 @@ export function Game() {
       />
     </div>
   );
+}
+
+function loadImage(url: string) {
+  return new Promise<HTMLImageElement | null>((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => resolve(null);
+    image.src = url;
+  });
 }
 
 function Stat({ label, value }: { label: string; value: number }) {
